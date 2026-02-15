@@ -4,6 +4,11 @@ Hyprland compositor plugin that adds kinetic (inertial) scrolling for touchpads
 at the compositor level, so momentum scrolling works consistently across apps
 (not just in browsers).
 
+Prebuilt binaries are tied to a specific Hyprland version/ABI. If you’re not on
+the same version, install via hyprpm (build locally) instead.
+
+Releases: https://github.com/savonovv/hypr-kinetic-scroll/releases
+
 ## Features
 
 - Touchpad-only inertia (ignores real mouse wheels)
