@@ -23,6 +23,16 @@ at the compositor level, so momentum scrolling works consistently across apps
 make
 ```
 
+## Install via hyprpm (build locally)
+
+This is the safest way to get a matching binary for your Hyprland version:
+
+```bash
+hyprpm add https://github.com/savonovv/hypr-kinetic-scroll
+hyprpm update
+hyprpm enable hypr-kinetic-scroll
+```
+
 ## Load / Unload
 
 Hyprland caches plugins by path. When reloading after rebuilds, unload and load
@@ -61,6 +71,12 @@ Notes:
 
 The plugin also respects Hyprland's `input:touchpad:scroll_factor` for
 synthetic events.
+
+## Test / Verify
+
+1) Load the plugin (or enable via hyprpm).
+2) Run `hyprctl plugin list` and verify `hypr-kinetic-scroll` is listed.
+3) Do a short two-finger scroll and lift. You should see momentum.
 
 ## Debug
 
