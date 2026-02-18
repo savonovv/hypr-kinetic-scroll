@@ -2,12 +2,22 @@
 #include "globals.hpp"
 #include <hyprland/src/Compositor.hpp>
 #include <hyprland/src/managers/SeatManager.hpp>
+#include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/config/ConfigValue.hpp>
 #include <chrono>
 #include <cmath>
 #include <string>
 #include <fstream>
 #include <cstdint>
+
+static bool classLooksLikeBrowser(std::string cls) {
+    for (auto& c : cls)
+        c = std::tolower(static_cast<unsigned char>(c));
+
+    return cls.find("firefox") != std::string::npos || cls.find("chrom") != std::string::npos || cls.find("brave") != std::string::npos ||
+           cls.find("vivaldi") != std::string::npos || cls.find("opera") != std::string::npos || cls.find("librewolf") != std::string::npos ||
+           cls.find("zen") != std::string::npos;
+}
 
 KineticState::KineticState() {
     auto* loop = g_pCompositor->m_wlEventLoop;
@@ -25,6 +35,8 @@ KineticState::~KineticState() {
 void KineticState::onAxis(IPointer::SAxisEvent& e) {
     static auto const* PENABLED =
         (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:enabled")->getDataStaticPtr();
+    static auto const* PDISABLE_BROWSER =
+        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:disable_in_browser")->getDataStaticPtr();
     static auto const* PDELTA_MUL =
         (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:delta_multiplier")->getDataStaticPtr();
     static auto const* PDEBUG =
@@ -33,6 +45,12 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
 
     if (!**PENABLED)
         return;
+
+    if (**PDISABLE_BROWSER) {
+        const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
+        if (PWIN && classLooksLikeBrowser(PWIN->m_class))
+            return;
+    }
 
     // Only handle touchpad scrolling (some devices report as mouse with smooth deltas)
     const bool touchpadSource = (e.source == WL_POINTER_AXIS_SOURCE_FINGER || e.source == WL_POINTER_AXIS_SOURCE_CONTINUOUS);
