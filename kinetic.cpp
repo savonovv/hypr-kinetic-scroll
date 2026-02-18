@@ -9,6 +9,7 @@
 #include <string>
 #include <fstream>
 #include <cstdint>
+#include <cctype>
 
 static bool classLooksLikeBrowser(std::string cls) {
     for (auto& c : cls)
@@ -17,6 +18,27 @@ static bool classLooksLikeBrowser(std::string cls) {
     return cls.find("firefox") != std::string::npos || cls.find("chrom") != std::string::npos || cls.find("brave") != std::string::npos ||
            cls.find("vivaldi") != std::string::npos || cls.find("opera") != std::string::npos || cls.find("librewolf") != std::string::npos ||
            cls.find("zen") != std::string::npos;
+}
+
+struct SScrollTargetKeys {
+    uintptr_t windowKey  = 0;
+    uintptr_t surfaceKey = 0;
+};
+
+static SScrollTargetKeys currentScrollTargetKeys() {
+    SScrollTargetKeys out;
+
+    if (g_pInputManager) {
+        const auto PWIN = g_pInputManager->m_lastMouseFocus.lock();
+        out.windowKey   = PWIN ? reinterpret_cast<uintptr_t>(PWIN.get()) : 0;
+    }
+
+    if (g_pSeatManager) {
+        const auto PSURF = g_pSeatManager->m_state.pointerFocus.lock();
+        out.surfaceKey   = PSURF ? reinterpret_cast<uintptr_t>(PSURF.get()) : 0;
+    }
+
+    return out;
 }
 
 KineticState::KineticState() {
@@ -37,6 +59,8 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
         (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:enabled")->getDataStaticPtr();
     static auto const* PDISABLE_BROWSER =
         (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:disable_in_browser")->getDataStaticPtr();
+    static auto const* PSTOPTARGET =
+        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_target_change")->getDataStaticPtr();
     static auto const* PDELTA_MUL =
         (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:delta_multiplier")->getDataStaticPtr();
     static auto const* PDEBUG =
@@ -46,10 +70,22 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
     if (!**PENABLED)
         return;
 
+    const auto targetKeys = currentScrollTargetKeys();
+
+    if (**PSTOPTARGET && m_scrollTargetWindowKey != 0) {
+        const bool windowChanged = targetKeys.windowKey != 0 && targetKeys.windowKey != m_scrollTargetWindowKey;
+        const bool surfaceChanged = targetKeys.surfaceKey != 0 && targetKeys.surfaceKey != m_scrollTargetSurfaceKey;
+        if (windowChanged || surfaceChanged)
+            stopKinetic("targetChanged");
+    }
+
     if (**PDISABLE_BROWSER) {
         const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
-        if (PWIN && classLooksLikeBrowser(PWIN->m_class))
+        if (PWIN && classLooksLikeBrowser(PWIN->m_class)) {
+            if (m_decaying)
+                stopKinetic("browserFocus");
             return;
+        }
     }
 
     // Only handle touchpad scrolling (some devices report as mouse with smooth deltas)
@@ -75,7 +111,9 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
         wl_event_source_timer_update(m_decayTimer, 0);
     }
 
-    m_tracking = true;
+    m_tracking              = true;
+    m_scrollTargetWindowKey = targetKeys.windowKey;
+    m_scrollTargetSurfaceKey = targetKeys.surfaceKey;
 
     constexpr double alpha = 0.3;
     uint32_t         dt    = e.timeMs - m_lastEventMs;
@@ -142,7 +180,9 @@ void KineticState::stopKinetic(const char* reason) {
     m_velocityH   = 0.0;
     m_tracking    = false;
     m_decaying    = false;
-    m_lastEventMs = 0;
+    m_lastEventMs          = 0;
+    m_scrollTargetWindowKey = 0;
+    m_scrollTargetSurfaceKey = 0;
     wl_event_source_timer_update(m_stopTimer, 0);
     wl_event_source_timer_update(m_decayTimer, 0);
 }
@@ -188,6 +228,10 @@ int KineticState::onDecayTimer(void* data) {
 
     static auto const* PDEBUG =
         (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:debug")->getDataStaticPtr();
+    static auto const* PDISABLE_BROWSER =
+        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:disable_in_browser")->getDataStaticPtr();
+    static auto const* PSTOPTARGET =
+        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_target_change")->getDataStaticPtr();
 
     if (!self->m_decaying) {
         if (**PDEBUG) {
@@ -196,6 +240,25 @@ int KineticState::onDecayTimer(void* data) {
                 log << "[hypr-kinetic-scroll] decayTimer skipped (not decaying)\n";
         }
         return 0;
+    }
+
+    const auto targetKeys = currentScrollTargetKeys();
+
+    if (**PSTOPTARGET && self->m_scrollTargetWindowKey != 0) {
+        const bool windowChanged  = targetKeys.windowKey != 0 && targetKeys.windowKey != self->m_scrollTargetWindowKey;
+        const bool surfaceChanged = targetKeys.surfaceKey != 0 && targetKeys.surfaceKey != self->m_scrollTargetSurfaceKey;
+        if (windowChanged || surfaceChanged) {
+            self->stopKinetic("targetChangedDecay");
+            return 0;
+        }
+    }
+
+    if (**PDISABLE_BROWSER) {
+        const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
+        if (PWIN && classLooksLikeBrowser(PWIN->m_class)) {
+            self->stopKinetic("browserDecay");
+            return 0;
+        }
     }
 
     static auto const* PDECEL =
