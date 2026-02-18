@@ -65,6 +65,7 @@ plugin:kinetic-scroll:min_velocity = 1.3
 plugin:kinetic-scroll:interval_ms = 8
 plugin:kinetic-scroll:delta_multiplier = 1.25
 plugin:kinetic-scroll:disable_in_browser = 1
+plugin:kinetic-scroll:stop_on_target_change = 1
 
 # Optional debug
 plugin:kinetic-scroll:debug = 0
@@ -79,6 +80,7 @@ Notes:
 - `interval_ms` controls the decay frame rate (lower = smoother).
 - `delta_multiplier` scales swipe impulse (higher = faster acceleration buildup).
 - `disable_in_browser` keeps native browser kinetic scrolling when set to `1`.
+- `stop_on_target_change` stops active inertia when scroll target window changes.
 
 The plugin also respects Hyprland's `input:touchpad:scroll_factor` for
 synthetic events.
