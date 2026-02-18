@@ -25,6 +25,8 @@ KineticState::~KineticState() {
 void KineticState::onAxis(IPointer::SAxisEvent& e) {
     static auto const* PENABLED =
         (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:enabled")->getDataStaticPtr();
+    static auto const* PDELTA_MUL =
+        (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:delta_multiplier")->getDataStaticPtr();
     static auto const* PDEBUG =
         (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:debug")->getDataStaticPtr();
     static uint64_t s_lastNotifyMs = 0;
@@ -41,14 +43,18 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
     if (e.delta == 0.0 && e.deltaDiscrete == 0)
         return;
 
-    // New finger scroll while decaying => stop kinetic, start fresh tracking
-    if (m_decaying) {
+    const double scaledDelta = e.delta * **PDELTA_MUL;
+
+    // New finger scroll while decaying => continue from current momentum
+    const bool resumedFromDecay = m_decaying;
+    if (resumedFromDecay) {
         if (**PDEBUG) {
             std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
             if (log.is_open())
-                log << "[hypr-kinetic-scroll] onAxis: decaying -> stopKinetic self=" << this << "\n";
+                log << "[hypr-kinetic-scroll] onAxis: decaying -> resume self=" << this << "\n";
         }
-        stopKinetic("decaying");
+        m_decaying = false;
+        wl_event_source_timer_update(m_decayTimer, 0);
     }
 
     m_tracking = true;
@@ -59,15 +65,21 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
     if (m_lastEventMs > 0 && dt > 0 && dt < 200) {
         // Exponential smoothing of deltas
         if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-            m_velocityV = alpha * e.delta + (1.0 - alpha) * m_velocityV;
+            m_velocityV = alpha * scaledDelta + (1.0 - alpha) * m_velocityV;
         else
-            m_velocityH = alpha * e.delta + (1.0 - alpha) * m_velocityH;
+            m_velocityH = alpha * scaledDelta + (1.0 - alpha) * m_velocityH;
+    } else if (resumedFromDecay) {
+        // Continue inertia: add new gesture impulse on top of remaining momentum
+        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
+            m_velocityV += scaledDelta;
+        else
+            m_velocityH += scaledDelta;
     } else {
         // First event or large gap - seed velocity directly
         if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-            m_velocityV = e.delta;
+            m_velocityV = scaledDelta;
         else
-            m_velocityH = e.delta;
+            m_velocityH = scaledDelta;
     }
 
     m_lastEventMs = e.timeMs;
