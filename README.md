@@ -46,11 +46,12 @@ from a fresh path:
 
 ```bash
 # unload (if previously loaded)
-hyprctl plugin unload /tmp/hypr-kinetic-scroll-*.so
+for p in /tmp/hypr-kinetic-scroll-*.so; do hyprctl plugin unload "$p"; done
 
 # load from a new temp path
-cp hypr-kinetic-scroll.so /tmp/hypr-kinetic-scroll-$(date +%s).so
-hyprctl plugin load /tmp/hypr-kinetic-scroll-$(date +%s).so
+TMP=/tmp/hypr-kinetic-scroll-$(date +%s).so
+cp hypr-kinetic-scroll.so "$TMP"
+hyprctl plugin load "$TMP"
 ```
 
 ## Configuration
