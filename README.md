@@ -13,6 +13,7 @@ Releases: https://github.com/savonovv/hypr-kinetic-scroll/releases
 
 - Touchpad-only inertia (ignores real mouse wheels)
 - Exponential velocity smoothing with configurable decay
+- Cumulative momentum when swiping again during an active decay
 - Synthetic scroll emission via Hyprland seat manager
 - Configurable thresholds and frame interval
 
@@ -61,6 +62,7 @@ plugin:kinetic-scroll:enabled = 1
 plugin:kinetic-scroll:decel = 0.99
 plugin:kinetic-scroll:min_velocity = 1.3
 plugin:kinetic-scroll:interval_ms = 8
+plugin:kinetic-scroll:delta_multiplier = 1.25
 
 # Optional debug
 plugin:kinetic-scroll:debug = 0
@@ -73,6 +75,7 @@ Notes:
 - `decel` is a multiplier applied each frame (lower = faster stop).
 - `min_velocity` is the cutoff threshold for stopping inertia.
 - `interval_ms` controls the decay frame rate (lower = smoother).
+- `delta_multiplier` scales swipe impulse (higher = faster acceleration buildup).
 
 The plugin also respects Hyprland's `input:touchpad:scroll_factor` for
 synthetic events.
