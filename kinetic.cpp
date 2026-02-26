@@ -10,6 +10,7 @@
 #include <fstream>
 #include <cstdint>
 #include <cctype>
+#include <algorithm>
 
 static bool classLooksLikeBrowser(std::string cls) {
     for (auto& c : cls)
@@ -54,6 +55,53 @@ KineticState::~KineticState() {
         wl_event_source_remove(m_decayTimer);
 }
 
+void KineticState::addVelocitySample(bool vertical, uint32_t timeMs, double delta, uint32_t minSampleMs, size_t maxSamples) {
+    auto& lastSampleMs = vertical ? m_lastSampleMsV : m_lastSampleMsH;
+    auto& samples      = vertical ? m_velocitySamplesV : m_velocitySamplesH;
+
+    if (lastSampleMs == 0) {
+        lastSampleMs = timeMs;
+        return;
+    }
+
+    const uint32_t dt = timeMs - lastSampleMs;
+    if (dt < minSampleMs)
+        return;
+
+    lastSampleMs = timeMs;
+    if (dt == 0)
+        return;
+
+    const double velocity = delta / static_cast<double>(dt);
+    samples.emplace_back(timeMs, velocity);
+
+    while (samples.size() > maxSamples)
+        samples.pop_front();
+}
+
+double KineticState::averagedVelocity(bool vertical, uint32_t nowMs, uint32_t relevanceMs) {
+    auto& samples = vertical ? m_velocitySamplesV : m_velocitySamplesH;
+
+    while (!samples.empty() && (nowMs - samples.front().first) > relevanceMs)
+        samples.pop_front();
+
+    if (samples.empty())
+        return 0.0;
+
+    double sum = 0.0;
+    for (const auto& s : samples)
+        sum += s.second;
+
+    return sum / static_cast<double>(samples.size());
+}
+
+void KineticState::resetVelocityTrackers() {
+    m_lastSampleMsV = 0;
+    m_lastSampleMsH = 0;
+    m_velocitySamplesV.clear();
+    m_velocitySamplesH.clear();
+}
+
 void KineticState::onAxis(IPointer::SAxisEvent& e) {
     static auto const* PENABLED =
         (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:enabled")->getDataStaticPtr();
@@ -63,6 +111,12 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
         (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_target_change")->getDataStaticPtr();
     static auto const* PDELTA_MUL =
         (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:delta_multiplier")->getDataStaticPtr();
+    static auto const* PVEL_RELEVANCE_MS =
+        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:velocity_relevance_ms")->getDataStaticPtr();
+    static auto const* PMIN_SAMPLE_MS =
+        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:min_sample_ms")->getDataStaticPtr();
+    static auto const* PMAX_VELOCITY_SAMPLES =
+        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:max_velocity_samples")->getDataStaticPtr();
     static auto const* PDEBUG =
         (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:debug")->getDataStaticPtr();
     static uint64_t s_lastNotifyMs = 0;
@@ -108,6 +162,7 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
                 log << "[hypr-kinetic-scroll] onAxis: decaying -> resume self=" << this << "\n";
         }
         m_decaying = false;
+        m_lastDecaySampleMs = 0;
         wl_event_source_timer_update(m_decayTimer, 0);
     }
 
@@ -115,27 +170,31 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
     m_scrollTargetWindowKey = targetKeys.windowKey;
     m_scrollTargetSurfaceKey = targetKeys.surfaceKey;
 
-    constexpr double alpha = 0.3;
-    uint32_t         dt    = e.timeMs - m_lastEventMs;
+    const uint32_t minSampleMs = std::max(1, static_cast<int>(**PMIN_SAMPLE_MS));
+    const uint32_t relevanceMs = std::max(1, static_cast<int>(**PVEL_RELEVANCE_MS));
+    const size_t   maxSamples  = static_cast<size_t>(std::max(1, static_cast<int>(**PMAX_VELOCITY_SAMPLES)));
 
-    if (m_lastEventMs > 0 && dt > 0 && dt < 200) {
-        // Exponential smoothing of deltas
-        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-            m_velocityV = alpha * scaledDelta + (1.0 - alpha) * m_velocityV;
+    const bool verticalAxis = e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL;
+    addVelocitySample(verticalAxis, e.timeMs, scaledDelta, minSampleMs, maxSamples);
+
+    double trackedVelocity = averagedVelocity(verticalAxis, e.timeMs, relevanceMs);
+    if (trackedVelocity == 0.0) {
+        uint32_t seedDt = 16;
+        if (m_lastEventMs > 0 && e.timeMs > m_lastEventMs)
+            seedDt = std::max<uint32_t>(1, e.timeMs - m_lastEventMs);
+        trackedVelocity = scaledDelta / static_cast<double>(seedDt);
+    }
+
+    if (verticalAxis) {
+        if (resumedFromDecay)
+            m_velocityV += trackedVelocity;
         else
-            m_velocityH = alpha * scaledDelta + (1.0 - alpha) * m_velocityH;
-    } else if (resumedFromDecay) {
-        // Continue inertia: add new gesture impulse on top of remaining momentum
-        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-            m_velocityV += scaledDelta;
-        else
-            m_velocityH += scaledDelta;
+            m_velocityV = trackedVelocity;
     } else {
-        // First event or large gap - seed velocity directly
-        if (e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL)
-            m_velocityV = scaledDelta;
+        if (resumedFromDecay)
+            m_velocityH += trackedVelocity;
         else
-            m_velocityH = scaledDelta;
+            m_velocityH = trackedVelocity;
     }
 
     m_lastEventMs = e.timeMs;
@@ -147,13 +206,13 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
             const char* axis = e.axis == WL_POINTER_AXIS_VERTICAL_SCROLL ? "v" : "h";
             std::string msg = "[hypr-kinetic-scroll] axis=" + std::string(axis) +
                               " delta=" + std::to_string(e.delta) +
-                              " source=" + std::to_string((int)e.source) +
-                              " mouse=" + std::to_string(e.mouse ? 1 : 0) +
-                              " discrete=" + std::to_string(e.deltaDiscrete) +
-                              " dt=" + std::to_string(dt) +
-                              " v=" + std::to_string(m_velocityV) +
-                              " h=" + std::to_string(m_velocityH) +
-                              " self=" + std::to_string(reinterpret_cast<uintptr_t>(this));
+                               " source=" + std::to_string((int)e.source) +
+                               " mouse=" + std::to_string(e.mouse ? 1 : 0) +
+                               " discrete=" + std::to_string(e.deltaDiscrete) +
+                               " trackedV=" + std::to_string(trackedVelocity) +
+                               " v=" + std::to_string(m_velocityV) +
+                               " h=" + std::to_string(m_velocityH) +
+                               " self=" + std::to_string(reinterpret_cast<uintptr_t>(this));
             HyprlandAPI::addNotification(PHANDLE, msg, CHyprColor{0.2, 0.6, 1.0, 1.0}, 1000);
             std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
             if (log.is_open())
@@ -181,8 +240,10 @@ void KineticState::stopKinetic(const char* reason) {
     m_tracking    = false;
     m_decaying    = false;
     m_lastEventMs          = 0;
+    m_lastDecaySampleMs    = 0;
     m_scrollTargetWindowKey = 0;
     m_scrollTargetSurfaceKey = 0;
+    resetVelocityTrackers();
     wl_event_source_timer_update(m_stopTimer, 0);
     wl_event_source_timer_update(m_decayTimer, 0);
 }
@@ -205,9 +266,15 @@ int KineticState::onStopTimer(void* data) {
 
     static auto const* PMINVEL =
         (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:min_velocity")->getDataStaticPtr();
+    static auto const* PINTERVAL =
+        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:interval_ms")->getDataStaticPtr();
+
+    const double intervalMs = static_cast<double>(std::max(1, static_cast<int>(**PINTERVAL)));
+    const double projectedV = std::abs(self->m_velocityV) * intervalMs;
+    const double projectedH = std::abs(self->m_velocityH) * intervalMs;
 
     // Only start kinetic if velocity is above threshold
-    if (std::abs(self->m_velocityV) < **PMINVEL && std::abs(self->m_velocityH) < **PMINVEL) {
+    if (projectedV < **PMINVEL && projectedH < **PMINVEL) {
         self->m_tracking = false;
         return 0;
     }
@@ -215,9 +282,6 @@ int KineticState::onStopTimer(void* data) {
     // Finger lifted - begin kinetic decay
     self->m_tracking = false;
     self->m_decaying = true;
-
-    static auto const* PINTERVAL =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:interval_ms")->getDataStaticPtr();
 
     wl_event_source_timer_update(self->m_decayTimer, **PINTERVAL);
     return 0;
@@ -263,31 +327,51 @@ int KineticState::onDecayTimer(void* data) {
 
     static auto const* PDECEL =
         (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:decel")->getDataStaticPtr();
+    static auto const* PFRICTION =
+        (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:friction")->getDataStaticPtr();
     static auto const* PMINVEL =
         (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:min_velocity")->getDataStaticPtr();
     static auto const* PINTERVAL =
         (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:interval_ms")->getDataStaticPtr();
 
-    // Apply deceleration
-    self->m_velocityV *= **PDECEL;
-    self->m_velocityH *= **PDECEL;
+    const auto now = std::chrono::steady_clock::now();
+    const auto nowMs = static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
+    const double intervalMs = static_cast<double>(std::max(1, static_cast<int>(**PINTERVAL)));
 
-    bool activeV = std::abs(self->m_velocityV) >= **PMINVEL;
-    bool activeH = std::abs(self->m_velocityH) >= **PMINVEL;
+    double dtMs = intervalMs;
+    if (self->m_lastDecaySampleMs > 0 && nowMs > self->m_lastDecaySampleMs)
+        dtMs = static_cast<double>(nowMs - self->m_lastDecaySampleMs);
+    self->m_lastDecaySampleMs = nowMs;
+
+    const double friction = static_cast<double>(**PFRICTION);
+    double       decayFactor;
+    if (friction > 0.0 && friction < 1.0) {
+        decayFactor = std::pow(1.0 - friction, dtMs);
+    } else {
+        const double decel = std::clamp(static_cast<double>(**PDECEL), 0.0, 1.0);
+        decayFactor        = std::pow(decel, dtMs / intervalMs);
+    }
+
+    self->m_velocityV *= decayFactor;
+    self->m_velocityH *= decayFactor;
+
+    const bool activeV = std::abs(self->m_velocityV) * dtMs >= **PMINVEL;
+    const bool activeH = std::abs(self->m_velocityH) * dtMs >= **PMINVEL;
 
     if (!activeV && !activeH) {
         self->stopKinetic("decayDone");
         return 0;
     }
 
-    self->emitSyntheticScroll();
+    self->emitSyntheticScroll(dtMs);
 
     // Re-arm for next frame
     wl_event_source_timer_update(self->m_decayTimer, **PINTERVAL);
     return 0;
 }
 
-void KineticState::emitSyntheticScroll() {
+void KineticState::emitSyntheticScroll(double dtMs) {
     static auto PSCROLLFACTOR = CConfigValue<Hyprlang::FLOAT>("input:touchpad:scroll_factor");
     static auto const* PMINVEL =
         (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:min_velocity")->getDataStaticPtr();
@@ -296,22 +380,22 @@ void KineticState::emitSyntheticScroll() {
     uint32_t timeMs      = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
     double   scrollFactor = *PSCROLLFACTOR;
 
-    if (std::abs(m_velocityV) >= **PMINVEL) {
+    if (std::abs(m_velocityV) * dtMs >= **PMINVEL) {
         g_pSeatManager->sendPointerAxis(
             timeMs,
             WL_POINTER_AXIS_VERTICAL_SCROLL,
-            m_velocityV * scrollFactor,
+            m_velocityV * dtMs * scrollFactor,
             0,   // discrete
             0,   // v120
             WL_POINTER_AXIS_SOURCE_CONTINUOUS,
             WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
     }
 
-    if (std::abs(m_velocityH) >= **PMINVEL) {
+    if (std::abs(m_velocityH) * dtMs >= **PMINVEL) {
         g_pSeatManager->sendPointerAxis(
             timeMs,
             WL_POINTER_AXIS_HORIZONTAL_SCROLL,
-            m_velocityH * scrollFactor,
+            m_velocityH * dtMs * scrollFactor,
             0,
             0,
             WL_POINTER_AXIS_SOURCE_CONTINUOUS,
