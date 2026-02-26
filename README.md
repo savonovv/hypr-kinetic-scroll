@@ -12,7 +12,7 @@ Releases: https://github.com/savonovv/hypr-kinetic-scroll/releases
 ## Features
 
 - Touchpad-only inertia (ignores real mouse wheels)
-- Exponential velocity smoothing with configurable decay
+- Firefox-style velocity tracking (sample window + relevance window)
 - Cumulative momentum when swiping again during an active decay
 - Synthetic scroll emission via Hyprland seat manager
 - Configurable thresholds and frame interval
@@ -61,9 +61,13 @@ Add these to your Hyprland config (e.g. `~/.config/hypr/input.conf`):
 ```ini
 plugin:kinetic-scroll:enabled = 1
 plugin:kinetic-scroll:decel = 0.99
-plugin:kinetic-scroll:min_velocity = 1.3
+plugin:kinetic-scroll:friction = 0.002
+plugin:kinetic-scroll:min_velocity = 0.6
 plugin:kinetic-scroll:interval_ms = 8
 plugin:kinetic-scroll:delta_multiplier = 1.25
+plugin:kinetic-scroll:velocity_relevance_ms = 100
+plugin:kinetic-scroll:min_sample_ms = 5
+plugin:kinetic-scroll:max_velocity_samples = 5
 plugin:kinetic-scroll:disable_in_browser = 1
 plugin:kinetic-scroll:stop_on_target_change = 1
 
@@ -75,10 +79,14 @@ plugin:kinetic-scroll:stop_on_focus = 0
 
 Notes:
 
-- `decel` is a multiplier applied each frame (lower = faster stop).
+- `friction` applies Firefox-like per-ms decay (`v *= (1 - friction)^dt`).
+- `decel` is a compatibility fallback if `friction <= 0`.
 - `min_velocity` is the cutoff threshold for stopping inertia.
 - `interval_ms` controls the decay frame rate (lower = smoother).
 - `delta_multiplier` scales swipe impulse (higher = faster acceleration buildup).
+- `velocity_relevance_ms` is the averaging window for recent velocity samples.
+- `min_sample_ms` ignores extremely short intervals to reduce velocity spikes.
+- `max_velocity_samples` limits stored samples in the tracker.
 - `disable_in_browser` keeps native browser kinetic scrolling when set to `1`.
 - `stop_on_target_change` stops active inertia when scroll target window changes.
 
@@ -107,6 +115,13 @@ This log shows incoming axis events, timing, and state transitions.
   treats `mouse=1` with `deltaDiscrete=0` as eligible touchpad input.
 - If you see a version mismatch error when loading, rebuild against the running
   Hyprland headers, or temporarily disable strict version checks (if applicable).
+
+## Acknowledgements
+
+- The inertia model in this release is inspired by Mozilla Firefox APZ scroll
+  physics work (velocity tracking + friction-based fling decay).
+- Huge thanks to the Mozilla community and contributors for the open source
+  implementation and tuning ideas that helped shape this plugin update.
 
 ## License
 
