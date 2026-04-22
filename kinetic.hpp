@@ -18,6 +18,8 @@ class KineticState {
 
     double    m_velocityV             = 0.0;
     double    m_velocityH             = 0.0;
+    double    m_peakVelocityV         = 0.0;
+    double    m_peakVelocityH         = 0.0;
     uint32_t  m_lastEventMs           = 0;
     bool      m_tracking              = false;
     bool      m_decaying              = false;
