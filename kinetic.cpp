@@ -25,6 +25,24 @@ struct SScrollTargetKeys {
     uintptr_t surfaceKey = 0;
 };
 
+bool KineticState::shouldProcessForWindow(const std::string& windowClass) {
+    auto it = m_perAppRules.find(windowClass);
+    if (it != m_perAppRules.end())
+        return it->second;
+    return true;
+}
+
+void KineticState::setAppRule(const std::string& appClass, bool enabled) {
+    m_perAppRules[appClass] = enabled;
+}
+
+bool KineticState::getAppRule(const std::string& appClass) const {
+    auto it = m_perAppRules.find(appClass);
+    if (it != m_perAppRules.end())
+        return it->second;
+    return true;
+}
+
 static SScrollTargetKeys currentScrollTargetKeys() {
     SScrollTargetKeys out;
 
@@ -84,6 +102,15 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
         if (PWIN && classLooksLikeBrowser(PWIN->m_class)) {
             if (m_decaying)
                 stopKinetic("browserFocus");
+            return;
+        }
+    }
+
+    {
+        const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
+        if (PWIN && !g_pKineticState->shouldProcessForWindow(PWIN->m_class)) {
+            if (m_decaying)
+                stopKinetic("appRule");
             return;
         }
     }
@@ -257,6 +284,14 @@ int KineticState::onDecayTimer(void* data) {
         const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
         if (PWIN && classLooksLikeBrowser(PWIN->m_class)) {
             self->stopKinetic("browserDecay");
+            return 0;
+        }
+    }
+
+    {
+        const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
+        if (PWIN && !self->shouldProcessForWindow(PWIN->m_class)) {
+            self->stopKinetic("appRuleDecay");
             return 0;
         }
     }

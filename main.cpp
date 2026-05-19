@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <any>
 #include <fstream>
+#include <sstream>
 
 static SP<HOOK_CALLBACK_FN> g_pAxisCallback;
 static SP<HOOK_CALLBACK_FN> g_pButtonCallback;
@@ -94,8 +95,28 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_click", Hyprlang::INT{0});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_focus", Hyprlang::INT{0});
 
-    // Create kinetic state (must be after compositor is ready, which it is during PLUGIN_INIT)
+    // Create kinetic state (must be before registering keyword so it's available during config parse)
     g_pKineticState = new KineticState();
+
+    HyprlandAPI::addConfigKeyword(PHANDLE, "kinetic-scroll-rule",
+        [](const std::string& value) -> std::string {
+            std::istringstream iss(value);
+            std::string mode, appClass;
+            if (!(iss >> mode >> appClass))
+                return "Invalid format: expected 'enable,class' or 'disable,class'";
+
+            bool enable = true;
+            if (mode == "disable")
+                enable = false;
+            else if (mode != "enable")
+                return "Invalid mode: expected 'enable' or 'disable'";
+
+            if (appClass.empty())
+                return "Missing app class";
+
+            g_pKineticState->setAppRule(appClass, enable);
+            return "";
+        }, {});
 
     // Register event callbacks
     g_pAxisCallback   = HyprlandAPI::registerCallbackDynamic(PHANDLE, "mouseAxis", onMouseAxis);

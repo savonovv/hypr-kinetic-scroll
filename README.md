@@ -73,6 +73,24 @@ plugin:kinetic-scroll:stop_on_click = 0
 plugin:kinetic-scroll:stop_on_focus = 0
 ```
 
+### Per-App Window Rules
+
+You can enable or disable kinetic scrolling for specific apps using `kinetic-scroll-rule`:
+
+```ini
+kinetic-scroll-rule disable <class>   # disable kinetic scroll for app
+kinetic-scroll-rule enable <class>    # enable kinetic scroll for app
+```
+
+Find a window's class with `hyprctl clients` or `xprop`.
+
+Examples:
+```ini
+kinetic-scroll-rule disable firefox
+kinetic-scroll-rule disable chromium
+kinetic-scroll-rule enable steam
+```
+
 Notes:
 
 - `decel` is a multiplier applied each frame (lower = faster stop).
