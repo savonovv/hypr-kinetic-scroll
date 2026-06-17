@@ -113,6 +113,31 @@ plugin:kinetic-scroll:disable_in_browser = 1
 kinetic-scroll-rule enable firefox
 ```
 
+Lua configs can use the same exact class matching through plugin functions:
+
+```lua
+hl.plugin.kinetic_scroll.disable("firefox")
+hl.plugin.kinetic_scroll.disable("chromium")
+```
+
+To enable kinetic scrolling only in selected apps from Lua:
+
+```lua
+hl.plugin.kinetic_scroll.disable_default()
+hl.plugin.kinetic_scroll.enable("steam")
+hl.plugin.kinetic_scroll.enable("org.gnome.Nautilus")
+```
+
+Available Lua functions:
+
+```lua
+hl.plugin.kinetic_scroll.enable(class)
+hl.plugin.kinetic_scroll.disable(class)
+hl.plugin.kinetic_scroll.enable_default()
+hl.plugin.kinetic_scroll.disable_default()
+hl.plugin.kinetic_scroll.reset_rules()
+```
+
 Notes:
 
 - `decel` is a multiplier applied each frame (lower = faster stop).
@@ -120,7 +145,7 @@ Notes:
 - `interval_ms` controls the decay frame rate (lower = smoother).
 - `delta_multiplier` scales swipe impulse (higher = faster acceleration buildup).
 - `disable_in_browser` keeps native browser kinetic scrolling when set to `1`.
-- `kinetic-scroll-rule` entries are reset and reparsed on Hyprland config reload.
+- Per-app rules are reset and reparsed on Hyprland config reload.
 - `stop_on_target_change` stops active inertia when scroll target window changes.
 
 The plugin also respects Hyprland's `input:touchpad:scroll_factor` for

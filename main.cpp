@@ -8,6 +8,11 @@
 #include <tuple>
 #include <utility>
 
+extern "C" {
+#include <lauxlib.h>
+#include <lua.h>
+}
+
 // Bypass header-side CSignalT::listen adapter so plugins keep working when the
 // running Hyprland was built against a different hyprutils minor version.
 struct SignalBaseAccessor : Hyprutils::Signal::CSignalBase {
@@ -117,6 +122,47 @@ static Hyprlang::CParseResult parseKineticScrollRule(const char* /*command*/, co
     return result;
 }
 
+static int luaSetAppRule(lua_State* L, bool enabled) {
+    const char* appClass = luaL_checkstring(L, 1);
+    if (g_pKineticState)
+        g_pKineticState->setAppRule(appClass, enabled);
+    return 0;
+}
+
+static int luaEnable(lua_State* L) {
+    return luaSetAppRule(L, true);
+}
+
+static int luaDisable(lua_State* L) {
+    return luaSetAppRule(L, false);
+}
+
+static int luaEnableDefault(lua_State* /*L*/) {
+    if (g_pKineticState)
+        g_pKineticState->setDefaultAppRule(true);
+    return 0;
+}
+
+static int luaDisableDefault(lua_State* /*L*/) {
+    if (g_pKineticState)
+        g_pKineticState->setDefaultAppRule(false);
+    return 0;
+}
+
+static int luaResetRules(lua_State* /*L*/) {
+    if (g_pKineticState)
+        g_pKineticState->resetAppRules();
+    return 0;
+}
+
+static void registerLuaFunctions() {
+    HyprlandAPI::addLuaFunction(PHANDLE, "kinetic_scroll", "enable", luaEnable);
+    HyprlandAPI::addLuaFunction(PHANDLE, "kinetic_scroll", "disable", luaDisable);
+    HyprlandAPI::addLuaFunction(PHANDLE, "kinetic_scroll", "enable_default", luaEnableDefault);
+    HyprlandAPI::addLuaFunction(PHANDLE, "kinetic_scroll", "disable_default", luaDisableDefault);
+    HyprlandAPI::addLuaFunction(PHANDLE, "kinetic_scroll", "reset_rules", luaResetRules);
+}
+
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
@@ -145,6 +191,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pKineticState = new KineticState();
 
     HyprlandAPI::addConfigKeyword(PHANDLE, "kinetic-scroll-rule", parseKineticScrollRule, {});
+    registerLuaFunctions();
 
     // Register event callbacks
     g_pAxisCallback = listenRaw(Event::bus()->m_events.input.mouse.axis, [](void* data) {
