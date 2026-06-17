@@ -92,6 +92,13 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
     // Only handle touchpad scrolling (some devices report as mouse with smooth deltas)
     const bool touchpadSource = (e.source == WL_POINTER_AXIS_SOURCE_FINGER || e.source == WL_POINTER_AXIS_SOURCE_CONTINUOUS);
     const bool smoothMouse    = (e.mouse && e.deltaDiscrete == 0);
+
+    // Discrete mouse wheel interrupt during active decay: stop the synthetic
+    // continuous sequence so the client properly processes wheel events instead
+    // of mixing them with ongoing synthetic scrolls.
+    if (m_decaying && !touchpadSource && !smoothMouse)
+        stopKinetic("mouseInterrupt");
+
     if (!touchpadSource && !smoothMouse)
         return;
 
@@ -183,6 +190,22 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
 
 void KineticState::stopKinetic(const char* reason) {
     static const CConfigValue<Config::INTEGER> PDEBUG("plugin:kinetic-scroll:debug");
+
+    // If we were decaying, terminate the continuous scroll sequence by sending
+    // axis_stop events. Without this, the client remains in "continuous scroll
+    // mode" and subsequent discrete mouse wheel events are misinterpreted as
+    // tiny smooth deltas -> very low scroll sensitivity per notch.
+    if (m_decaying) {
+        auto     now    = std::chrono::steady_clock::now();
+        uint32_t timeMs = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+
+        g_pSeatManager->sendPointerAxis(timeMs, WL_POINTER_AXIS_VERTICAL_SCROLL, 0.0, 0, 0,
+                                        WL_POINTER_AXIS_SOURCE_CONTINUOUS, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
+        g_pSeatManager->sendPointerAxis(timeMs, WL_POINTER_AXIS_HORIZONTAL_SCROLL, 0.0, 0, 0,
+                                        WL_POINTER_AXIS_SOURCE_CONTINUOUS, WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
+        g_pSeatManager->sendPointerFrame();
+    }
+
     if (*PDEBUG) {
         std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
         if (log.is_open())
