@@ -16,6 +16,7 @@ Releases: https://github.com/savonovv/hypr-kinetic-scroll/releases
 - Cumulative momentum when swiping again during an active decay
 - Synthetic scroll emission via Hyprland seat manager
 - Configurable thresholds and frame interval
+- Per-app enable/disable rules with exact class matching
 
 ## Requirements
 
@@ -73,22 +74,43 @@ plugin:kinetic-scroll:stop_on_click = 0
 plugin:kinetic-scroll:stop_on_focus = 0
 ```
 
-### Per-App Window Rules
+### Per-App Rules
 
-You can enable or disable kinetic scrolling for specific apps using `kinetic-scroll-rule`:
+You can enable or disable kinetic scrolling per app using `kinetic-scroll-rule`.
+Rules use exact window class matching.
 
 ```ini
-kinetic-scroll-rule disable <class>   # disable kinetic scroll for app
-kinetic-scroll-rule enable <class>    # enable kinetic scroll for app
+kinetic-scroll-rule disable <class>   # disable kinetic scrolling for one class
+kinetic-scroll-rule enable <class>    # enable kinetic scrolling for one class
+
+kinetic-scroll-rule disable           # disable kinetic scrolling by default
+kinetic-scroll-rule enable            # enable kinetic scrolling by default
 ```
 
 Find a window's class with `hyprctl clients` or `xprop`.
 
-Examples:
+Disable kinetic scrolling only in specific apps:
+
 ```ini
 kinetic-scroll-rule disable firefox
 kinetic-scroll-rule disable chromium
+```
+
+Enable kinetic scrolling only in specific apps:
+
+```ini
+kinetic-scroll-rule disable
 kinetic-scroll-rule enable steam
+kinetic-scroll-rule enable org.gnome.Nautilus
+```
+
+Explicit app rules override `plugin:kinetic-scroll:disable_in_browser`. For
+example, this enables kinetic scrolling in Firefox while keeping the browser
+default for every other browser:
+
+```ini
+plugin:kinetic-scroll:disable_in_browser = 1
+kinetic-scroll-rule enable firefox
 ```
 
 Notes:
@@ -98,6 +120,7 @@ Notes:
 - `interval_ms` controls the decay frame rate (lower = smoother).
 - `delta_multiplier` scales swipe impulse (higher = faster acceleration buildup).
 - `disable_in_browser` keeps native browser kinetic scrolling when set to `1`.
+- `kinetic-scroll-rule` entries are reset and reparsed on Hyprland config reload.
 - `stop_on_target_change` stops active inertia when scroll target window changes.
 
 The plugin also respects Hyprland's `input:touchpad:scroll_factor` for
