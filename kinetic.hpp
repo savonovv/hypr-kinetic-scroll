@@ -2,6 +2,8 @@
 #include <hyprland/src/devices/IPointer.hpp>
 #include <wayland-server-core.h>
 #include <cstdint>
+#include <unordered_map>
+#include <string>
 
 class KineticState {
   public:
@@ -10,11 +12,16 @@ class KineticState {
 
     void onAxis(IPointer::SAxisEvent& e);
     void stopKinetic(const char* reason = nullptr);
+    void setAppRule(const std::string& appClass, bool enabled);
+    void setDefaultAppRule(bool enabled);
+    void resetAppRules();
 
   private:
     static int onStopTimer(void* data);
     static int onDecayTimer(void* data);
     void       emitSyntheticScroll();
+    bool       hasAppRule(const std::string& windowClass) const;
+    bool       shouldProcessForWindow(const std::string& windowClass) const;
 
     double    m_velocityV             = 0.0;
     double    m_velocityH             = 0.0;
@@ -26,4 +33,7 @@ class KineticState {
 
     wl_event_source* m_stopTimer  = nullptr;
     wl_event_source* m_decayTimer = nullptr;
+
+    std::unordered_map<std::string, bool> m_perAppRules;
+    bool                                  m_defaultAppRule = true;
 };

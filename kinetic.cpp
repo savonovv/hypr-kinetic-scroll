@@ -25,6 +25,30 @@ struct SScrollTargetKeys {
     uintptr_t surfaceKey = 0;
 };
 
+bool KineticState::hasAppRule(const std::string& windowClass) const {
+    return m_perAppRules.contains(windowClass);
+}
+
+bool KineticState::shouldProcessForWindow(const std::string& windowClass) const {
+    const auto it = m_perAppRules.find(windowClass);
+    if (it != m_perAppRules.end())
+        return it->second;
+    return m_defaultAppRule;
+}
+
+void KineticState::setAppRule(const std::string& appClass, bool enabled) {
+    m_perAppRules[appClass] = enabled;
+}
+
+void KineticState::setDefaultAppRule(bool enabled) {
+    m_defaultAppRule = enabled;
+}
+
+void KineticState::resetAppRules() {
+    m_perAppRules.clear();
+    m_defaultAppRule = true;
+}
+
 static SScrollTargetKeys currentScrollTargetKeys() {
     SScrollTargetKeys out;
 
@@ -79,9 +103,16 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
             stopKinetic("targetChanged");
     }
 
-    if (**PDISABLE_BROWSER) {
-        const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
-        if (PWIN && classLooksLikeBrowser(PWIN->m_class)) {
+    const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
+    if (PWIN) {
+        const bool hasRule = hasAppRule(PWIN->m_class);
+        if (!shouldProcessForWindow(PWIN->m_class)) {
+            if (m_decaying)
+                stopKinetic("appRule");
+            return;
+        }
+
+        if (**PDISABLE_BROWSER && !hasRule && classLooksLikeBrowser(PWIN->m_class)) {
             if (m_decaying)
                 stopKinetic("browserFocus");
             return;
@@ -253,9 +284,15 @@ int KineticState::onDecayTimer(void* data) {
         }
     }
 
-    if (**PDISABLE_BROWSER) {
-        const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
-        if (PWIN && classLooksLikeBrowser(PWIN->m_class)) {
+    const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
+    if (PWIN) {
+        const bool hasRule = self->hasAppRule(PWIN->m_class);
+        if (!self->shouldProcessForWindow(PWIN->m_class)) {
+            self->stopKinetic("appRuleDecay");
+            return 0;
+        }
+
+        if (**PDISABLE_BROWSER && !hasRule && classLooksLikeBrowser(PWIN->m_class)) {
             self->stopKinetic("browserDecay");
             return 0;
         }

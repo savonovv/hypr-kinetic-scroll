@@ -4,6 +4,7 @@
 #include <hyprland/src/devices/IPointer.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <fstream>
+#include <sstream>
 #include <tuple>
 #include <utility>
 
@@ -21,6 +22,7 @@ static Hyprutils::Signal::CHyprSignalListener listenRaw(Signal& signal, Handler 
 static Hyprutils::Signal::CHyprSignalListener g_pAxisCallback;
 static Hyprutils::Signal::CHyprSignalListener g_pButtonCallback;
 static Hyprutils::Signal::CHyprSignalListener g_pWindowCallback;
+static Hyprutils::Signal::CHyprSignalListener g_pConfigReloadCallback;
 
 static void onMouseAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& /*info*/) {
     if (!g_pKineticState)
@@ -77,6 +79,44 @@ static void onActiveWindow() {
     g_pKineticState->stopKinetic("activeWindow");
 }
 
+static void onConfigPreReload() {
+    if (g_pKineticState)
+        g_pKineticState->resetAppRules();
+}
+
+static Hyprlang::CParseResult parseKineticScrollRule(const char* /*command*/, const char* value) {
+    Hyprlang::CParseResult result;
+    std::istringstream     iss(value ? value : "");
+    std::string            mode, appClass;
+
+    if (!(iss >> mode)) {
+        result.setError("Invalid format: expected 'enable [class]' or 'disable [class]'");
+        return result;
+    }
+
+    bool enable = true;
+    if (mode == "disable")
+        enable = false;
+    else if (mode != "enable") {
+        result.setError("Invalid mode: expected 'enable' or 'disable'");
+        return result;
+    }
+
+    if (!(iss >> appClass)) {
+        g_pKineticState->setDefaultAppRule(enable);
+        return result;
+    }
+
+    std::string extra;
+    if (iss >> extra) {
+        result.setError("Invalid format: expected 'enable [class]' or 'disable [class]'");
+        return result;
+    }
+
+    g_pKineticState->setAppRule(appClass, enable);
+    return result;
+}
+
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
@@ -101,8 +141,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_click", Hyprlang::INT{0});
     HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_focus", Hyprlang::INT{0});
 
-    // Create kinetic state (must be after compositor is ready, which it is during PLUGIN_INIT)
+    // Create kinetic state (must be before registering keyword so it's available during config parse)
     g_pKineticState = new KineticState();
+
+    HyprlandAPI::addConfigKeyword(PHANDLE, "kinetic-scroll-rule", parseKineticScrollRule, {});
 
     // Register event callbacks
     g_pAxisCallback = listenRaw(Event::bus()->m_events.input.mouse.axis, [](void* data) {
@@ -114,6 +156,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
         onMouseButton(std::get<0>(args), std::get<1>(args));
     });
     g_pWindowCallback = listenRaw(Event::bus()->m_events.window.active, [](void* /*data*/) { onActiveWindow(); });
+    g_pConfigReloadCallback = listenRaw(Event::bus()->m_events.config.preReload, [](void* /*data*/) { onConfigPreReload(); });
 
     HyprlandAPI::addNotification(PHANDLE, "[hypr-kinetic-scroll] Loaded!", CHyprColor{0.2, 0.8, 0.2, 1.0}, 3000);
 
@@ -126,6 +169,7 @@ APICALL EXPORT void PLUGIN_EXIT() {
     g_pAxisCallback.reset();
     g_pButtonCallback.reset();
     g_pWindowCallback.reset();
+    g_pConfigReloadCallback.reset();
 
     // Clean up kinetic state (removes wl timers)
     delete g_pKineticState;
