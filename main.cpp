@@ -84,6 +84,39 @@ static void onConfigPreReload() {
         g_pKineticState->resetAppRules();
 }
 
+static Hyprlang::CParseResult parseKineticScrollRule(const char* /*command*/, const char* value) {
+    Hyprlang::CParseResult result;
+    std::istringstream     iss(value ? value : "");
+    std::string            mode, appClass;
+
+    if (!(iss >> mode)) {
+        result.setError("Invalid format: expected 'enable [class]' or 'disable [class]'");
+        return result;
+    }
+
+    bool enable = true;
+    if (mode == "disable")
+        enable = false;
+    else if (mode != "enable") {
+        result.setError("Invalid mode: expected 'enable' or 'disable'");
+        return result;
+    }
+
+    if (!(iss >> appClass)) {
+        g_pKineticState->setDefaultAppRule(enable);
+        return result;
+    }
+
+    std::string extra;
+    if (iss >> extra) {
+        result.setError("Invalid format: expected 'enable [class]' or 'disable [class]'");
+        return result;
+    }
+
+    g_pKineticState->setAppRule(appClass, enable);
+    return result;
+}
+
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
@@ -111,31 +144,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // Create kinetic state (must be before registering keyword so it's available during config parse)
     g_pKineticState = new KineticState();
 
-    HyprlandAPI::addConfigKeyword(PHANDLE, "kinetic-scroll-rule",
-        [](const std::string& value) -> std::string {
-            std::istringstream iss(value);
-            std::string mode, appClass;
-            if (!(iss >> mode))
-                return "Invalid format: expected 'enable [class]' or 'disable [class]'";
-
-            bool enable = true;
-            if (mode == "disable")
-                enable = false;
-            else if (mode != "enable")
-                return "Invalid mode: expected 'enable' or 'disable'";
-
-            if (!(iss >> appClass)) {
-                g_pKineticState->setDefaultAppRule(enable);
-                return "";
-            }
-
-            std::string extra;
-            if (iss >> extra)
-                return "Invalid format: expected 'enable [class]' or 'disable [class]'";
-
-            g_pKineticState->setAppRule(appClass, enable);
-            return "";
-        }, {});
+    HyprlandAPI::addConfigKeyword(PHANDLE, "kinetic-scroll-rule", parseKineticScrollRule, {});
 
     // Register event callbacks
     g_pAxisCallback = listenRaw(Event::bus()->m_events.input.mouse.axis, [](void* data) {
