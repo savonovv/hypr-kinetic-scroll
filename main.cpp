@@ -4,6 +4,19 @@
 #include <hyprland/src/devices/IPointer.hpp>
 #include <hyprland/src/event/EventBus.hpp>
 #include <fstream>
+#include <tuple>
+#include <utility>
+
+// Bypass header-side CSignalT::listen adapter so plugins keep working when the
+// running Hyprland was built against a different hyprutils minor version.
+struct SignalBaseAccessor : Hyprutils::Signal::CSignalBase {
+    using Hyprutils::Signal::CSignalBase::registerListenerInternal;
+};
+
+template <typename Signal, typename Handler>
+static Hyprutils::Signal::CHyprSignalListener listenRaw(Signal& signal, Handler handler) {
+    return reinterpret_cast<SignalBaseAccessor*>(&signal)->registerListenerInternal(std::move(handler));
+}
 
 static Hyprutils::Signal::CHyprSignalListener g_pAxisCallback;
 static Hyprutils::Signal::CHyprSignalListener g_pButtonCallback;
@@ -92,9 +105,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pKineticState = new KineticState();
 
     // Register event callbacks
-    g_pAxisCallback   = Event::bus()->m_events.input.mouse.axis.listen(onMouseAxis);
-    g_pButtonCallback = Event::bus()->m_events.input.mouse.button.listen(onMouseButton);
-    g_pWindowCallback = Event::bus()->m_events.window.active.listen(onActiveWindow);
+    g_pAxisCallback = listenRaw(Event::bus()->m_events.input.mouse.axis, [](void* data) {
+        auto& args = *reinterpret_cast<std::tuple<const IPointer::SAxisEvent&, Event::SCallbackInfo&>*>(data);
+        onMouseAxis(std::get<0>(args), std::get<1>(args));
+    });
+    g_pButtonCallback = listenRaw(Event::bus()->m_events.input.mouse.button, [](void* data) {
+        auto& args = *reinterpret_cast<std::tuple<const IPointer::SButtonEvent&, Event::SCallbackInfo&>*>(data);
+        onMouseButton(std::get<0>(args), std::get<1>(args));
+    });
+    g_pWindowCallback = listenRaw(Event::bus()->m_events.window.active, [](void* /*data*/) { onActiveWindow(); });
 
     HyprlandAPI::addNotification(PHANDLE, "[hypr-kinetic-scroll] Loaded!", CHyprColor{0.2, 0.8, 0.2, 1.0}, 3000);
 
