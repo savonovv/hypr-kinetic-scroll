@@ -2,26 +2,36 @@
 #include "kinetic.hpp"
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
-#include <unordered_map>
-#include <any>
+#include <hyprland/src/event/EventBus.hpp>
 #include <fstream>
+#include <tuple>
+#include <utility>
 
-static SP<HOOK_CALLBACK_FN> g_pAxisCallback;
-static SP<HOOK_CALLBACK_FN> g_pButtonCallback;
-static SP<HOOK_CALLBACK_FN> g_pWindowCallback;
+// Bypass header-side CSignalT::listen adapter so plugins keep working when the
+// running Hyprland was built against a different hyprutils minor version.
+struct SignalBaseAccessor : Hyprutils::Signal::CSignalBase {
+    using Hyprutils::Signal::CSignalBase::registerListenerInternal;
+};
 
-static void onMouseAxis(void* /*self*/, SCallbackInfo& /*info*/, std::any data) {
+template <typename Signal, typename Handler>
+static Hyprutils::Signal::CHyprSignalListener listenRaw(Signal& signal, Handler handler) {
+    return reinterpret_cast<SignalBaseAccessor*>(&signal)->registerListenerInternal(std::move(handler));
+}
+
+static Hyprutils::Signal::CHyprSignalListener g_pAxisCallback;
+static Hyprutils::Signal::CHyprSignalListener g_pButtonCallback;
+static Hyprutils::Signal::CHyprSignalListener g_pWindowCallback;
+
+static void onMouseAxis(const IPointer::SAxisEvent& e, Event::SCallbackInfo& /*info*/) {
     if (!g_pKineticState)
         return;
 
-    auto eventData = std::any_cast<std::unordered_map<std::string, std::any>>(data);
-    auto e         = std::any_cast<IPointer::SAxisEvent>(eventData["event"]);
-
-    g_pKineticState->onAxis(e);
+    auto event = e;
+    g_pKineticState->onAxis(event);
     // Don't cancel - let the original scroll event pass through to the app
 }
 
-static void onMouseButton(void* /*self*/, SCallbackInfo& /*info*/, std::any data) {
+static void onMouseButton(const IPointer::SButtonEvent& e, Event::SCallbackInfo& /*info*/) {
     if (!g_pKineticState)
         return;
 
@@ -32,9 +42,6 @@ static void onMouseButton(void* /*self*/, SCallbackInfo& /*info*/, std::any data
 
     if (!**PSTOPCLICK)
         return;
-
-    auto eventData = std::any_cast<std::unordered_map<std::string, std::any>>(data);
-    auto e         = std::any_cast<IPointer::SButtonEvent>(eventData["event"]);
 
     if (e.state != WL_POINTER_BUTTON_STATE_PRESSED)
         return;
@@ -48,7 +55,7 @@ static void onMouseButton(void* /*self*/, SCallbackInfo& /*info*/, std::any data
     g_pKineticState->stopKinetic("mouseButton");
 }
 
-static void onActiveWindow(void* /*self*/, SCallbackInfo& /*info*/, std::any /*data*/) {
+static void onActiveWindow() {
     if (!g_pKineticState)
         return;
 
@@ -98,9 +105,15 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     g_pKineticState = new KineticState();
 
     // Register event callbacks
-    g_pAxisCallback   = HyprlandAPI::registerCallbackDynamic(PHANDLE, "mouseAxis", onMouseAxis);
-    g_pButtonCallback = HyprlandAPI::registerCallbackDynamic(PHANDLE, "mouseButton", onMouseButton);
-    g_pWindowCallback = HyprlandAPI::registerCallbackDynamic(PHANDLE, "activeWindow", onActiveWindow);
+    g_pAxisCallback = listenRaw(Event::bus()->m_events.input.mouse.axis, [](void* data) {
+        auto& args = *reinterpret_cast<std::tuple<const IPointer::SAxisEvent&, Event::SCallbackInfo&>*>(data);
+        onMouseAxis(std::get<0>(args), std::get<1>(args));
+    });
+    g_pButtonCallback = listenRaw(Event::bus()->m_events.input.mouse.button, [](void* data) {
+        auto& args = *reinterpret_cast<std::tuple<const IPointer::SButtonEvent&, Event::SCallbackInfo&>*>(data);
+        onMouseButton(std::get<0>(args), std::get<1>(args));
+    });
+    g_pWindowCallback = listenRaw(Event::bus()->m_events.window.active, [](void* /*data*/) { onActiveWindow(); });
 
     HyprlandAPI::addNotification(PHANDLE, "[hypr-kinetic-scroll] Loaded!", CHyprColor{0.2, 0.8, 0.2, 1.0}, 3000);
 
