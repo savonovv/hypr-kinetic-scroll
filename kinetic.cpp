@@ -10,6 +10,7 @@
 #include <fstream>
 #include <cstdint>
 #include <cctype>
+#include <sstream>
 
 static bool classLooksLikeBrowser(std::string cls) {
     for (auto& c : cls)
@@ -18,6 +19,26 @@ static bool classLooksLikeBrowser(std::string cls) {
     return cls.find("firefox") != std::string::npos || cls.find("chrom") != std::string::npos || cls.find("brave") != std::string::npos ||
            cls.find("vivaldi") != std::string::npos || cls.find("opera") != std::string::npos || cls.find("librewolf") != std::string::npos ||
            cls.find("zen") != std::string::npos;
+}
+
+static bool classInList(std::string cls, std::string list) {
+    for (auto& c : cls)
+        c = std::tolower(static_cast<unsigned char>(c));
+
+    for (auto& c : list) {
+        if (c == ',')
+            c = ' ';
+        else
+            c = std::tolower(static_cast<unsigned char>(c));
+    }
+
+    std::istringstream iss(list);
+    for (std::string item; iss >> item;) {
+        if (item == cls)
+            return true;
+    }
+
+    return false;
 }
 
 struct SScrollTargetKeys {
@@ -96,6 +117,12 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
     const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
     if (PWIN) {
         const bool hasRule = hasAppRule(PWIN->m_class);
+        if (classInList(PWIN->m_class, getKineticConfigString("disabled_classes", ""))) {
+            if (m_decaying)
+                stopKinetic("disabledClasses");
+            return;
+        }
+
         if (!shouldProcessForWindow(PWIN->m_class)) {
             if (m_decaying)
                 stopKinetic("appRule");
@@ -261,6 +288,11 @@ int KineticState::onDecayTimer(void* data) {
     const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
     if (PWIN) {
         const bool hasRule = self->hasAppRule(PWIN->m_class);
+        if (classInList(PWIN->m_class, getKineticConfigString("disabled_classes", ""))) {
+            self->stopKinetic("disabledClassesDecay");
+            return 0;
+        }
+
         if (!self->shouldProcessForWindow(PWIN->m_class)) {
             self->stopKinetic("appRuleDecay");
             return 0;

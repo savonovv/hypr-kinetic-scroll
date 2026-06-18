@@ -3,25 +3,15 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/config/values/types/FloatValue.hpp>
+#include <hyprland/src/config/values/types/IntValue.hpp>
+#include <hyprland/src/config/values/types/StringValue.hpp>
 #include <fstream>
 #include <sstream>
-#include <tuple>
-#include <utility>
 
 extern "C" {
 #include <lauxlib.h>
 #include <lua.h>
-}
-
-// Bypass header-side CSignalT::listen adapter so plugins keep working when the
-// running Hyprland was built against a different hyprutils minor version.
-struct SignalBaseAccessor : Hyprutils::Signal::CSignalBase {
-    using Hyprutils::Signal::CSignalBase::registerListenerInternal;
-};
-
-template <typename Signal, typename Handler>
-static Hyprutils::Signal::CHyprSignalListener listenRaw(Signal& signal, Handler handler) {
-    return reinterpret_cast<SignalBaseAccessor*>(&signal)->registerListenerInternal(std::move(handler));
 }
 
 static Hyprutils::Signal::CHyprSignalListener g_pAxisCallback;
@@ -153,6 +143,21 @@ static void registerLuaFunctions() {
     HyprlandAPI::addLuaFunction(PHANDLE, "kinetic_scroll", "reset_rules", luaResetRules);
 }
 
+static void registerConfigValues() {
+    using namespace Config::Values;
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:enabled", "Enable kinetic scrolling", 1));
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CFloatValue>("plugin:kinetic-scroll:decel", "Kinetic deceleration multiplier", 0.92F));
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CFloatValue>("plugin:kinetic-scroll:min_velocity", "Minimum velocity before stopping", 0.5F));
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:interval_ms", "Kinetic timer interval", 16));
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CFloatValue>("plugin:kinetic-scroll:delta_multiplier", "Scroll delta multiplier", 1.25F));
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:disable_in_browser", "Disable kinetic scrolling in browsers", 1));
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:stop_on_target_change", "Stop inertia when scroll target changes", 1));
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:debug", "Enable kinetic scroll debug logging", 0));
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:stop_on_click", "Stop inertia on mouse click", 0));
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:stop_on_focus", "Stop inertia on focus change", 0));
+    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CStringValue>("plugin:kinetic-scroll:disabled_classes", "Comma or space separated classes with kinetic scrolling disabled", ""));
+}
+
 APICALL EXPORT std::string PLUGIN_API_VERSION() {
     return HYPRLAND_API_VERSION;
 }
@@ -165,17 +170,7 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     // if (__hyprland_api_get_hash() != __hyprland_api_get_client_hash())
     //     throw std::runtime_error("Version mismatch");
 
-    // Register config values
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:enabled", Hyprlang::INT{1});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:decel", Hyprlang::FLOAT{0.92});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:min_velocity", Hyprlang::FLOAT{0.5});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:interval_ms", Hyprlang::INT{16});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:delta_multiplier", Hyprlang::FLOAT{1.25});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:disable_in_browser", Hyprlang::INT{1});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_target_change", Hyprlang::INT{1});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:debug", Hyprlang::INT{0});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_click", Hyprlang::INT{0});
-    HyprlandAPI::addConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_focus", Hyprlang::INT{0});
+    registerConfigValues();
 
     // Create kinetic state (must be before registering keyword so it's available during config parse)
     g_pKineticState = new KineticState();
@@ -184,16 +179,10 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     registerLuaFunctions();
 
     // Register event callbacks
-    g_pAxisCallback = listenRaw(Event::bus()->m_events.input.mouse.axis, [](void* data) {
-        auto& args = *reinterpret_cast<std::tuple<const IPointer::SAxisEvent&, Event::SCallbackInfo&>*>(data);
-        onMouseAxis(std::get<0>(args), std::get<1>(args));
-    });
-    g_pButtonCallback = listenRaw(Event::bus()->m_events.input.mouse.button, [](void* data) {
-        auto& args = *reinterpret_cast<std::tuple<const IPointer::SButtonEvent&, Event::SCallbackInfo&>*>(data);
-        onMouseButton(std::get<0>(args), std::get<1>(args));
-    });
-    g_pWindowCallback = listenRaw(Event::bus()->m_events.window.active, [](void* /*data*/) { onActiveWindow(); });
-    g_pConfigReloadCallback = listenRaw(Event::bus()->m_events.config.preReload, [](void* /*data*/) { onConfigPreReload(); });
+    g_pAxisCallback = Event::bus()->m_events.input.mouse.axis.listen(onMouseAxis);
+    g_pButtonCallback = Event::bus()->m_events.input.mouse.button.listen(onMouseButton);
+    g_pWindowCallback = Event::bus()->m_events.window.active.listen(onActiveWindow);
+    g_pConfigReloadCallback = Event::bus()->m_events.config.preReload.listen(onConfigPreReload);
 
     HyprlandAPI::addNotification(PHANDLE, "[hypr-kinetic-scroll] Loaded!", CHyprColor{0.2, 0.8, 0.2, 1.0}, 3000);
 

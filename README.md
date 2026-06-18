@@ -67,6 +67,7 @@ plugin:kinetic-scroll:interval_ms = 8
 plugin:kinetic-scroll:delta_multiplier = 1.25
 plugin:kinetic-scroll:disable_in_browser = 1
 plugin:kinetic-scroll:stop_on_target_change = 1
+plugin:kinetic-scroll:disabled_classes =
 
 # Optional debug
 plugin:kinetic-scroll:debug = 0
@@ -76,47 +77,21 @@ plugin:kinetic-scroll:stop_on_focus = 0
 
 ### Per-App Rules
 
-You can enable or disable kinetic scrolling per app using `kinetic-scroll-rule`.
-Rules use exact window class matching.
+For INI configs, disable kinetic scrolling per app with
+`plugin:kinetic-scroll:disabled_classes`. Classes are exact matches and can be
+separated by commas or spaces.
 
 ```ini
-kinetic-scroll-rule disable <class>   # disable kinetic scrolling for one class
-kinetic-scroll-rule enable <class>    # enable kinetic scrolling for one class
-
-kinetic-scroll-rule disable           # disable kinetic scrolling by default
-kinetic-scroll-rule enable            # enable kinetic scrolling by default
+plugin:kinetic-scroll:disabled_classes = org.telegram.desktop
+plugin:kinetic-scroll:disabled_classes = org.telegram.desktop, steam
 ```
 
 Find a window's class with `hyprctl clients` or `xprop`.
 
-Disable kinetic scrolling only in specific apps:
-
-```ini
-kinetic-scroll-rule disable firefox
-kinetic-scroll-rule disable chromium
-```
-
-Enable kinetic scrolling only in specific apps:
-
-```ini
-kinetic-scroll-rule disable
-kinetic-scroll-rule enable steam
-kinetic-scroll-rule enable org.gnome.Nautilus
-```
-
-Explicit app rules override `plugin:kinetic-scroll:disable_in_browser`. For
-example, this enables kinetic scrolling in Firefox while keeping the browser
-default for every other browser:
-
-```ini
-plugin:kinetic-scroll:disable_in_browser = 1
-kinetic-scroll-rule enable firefox
-```
-
 Lua configs can use the same exact class matching through plugin functions:
 
 ```lua
-hl.plugin.kinetic_scroll.disable("firefox")
+hl.plugin.kinetic_scroll.disable("org.telegram.desktop")
 hl.plugin.kinetic_scroll.disable("chromium")
 ```
 
@@ -138,6 +113,14 @@ hl.plugin.kinetic_scroll.disable_default()
 hl.plugin.kinetic_scroll.reset_rules()
 ```
 
+`kinetic-scroll-rule` is still available for older legacy INI configs that
+accept plugin keywords:
+
+```ini
+kinetic-scroll-rule disable firefox
+kinetic-scroll-rule enable firefox
+```
+
 Notes:
 
 - `decel` is a multiplier applied each frame (lower = faster stop).
@@ -145,7 +128,7 @@ Notes:
 - `interval_ms` controls the decay frame rate (lower = smoother).
 - `delta_multiplier` scales swipe impulse (higher = faster acceleration buildup).
 - `disable_in_browser` keeps native browser kinetic scrolling when set to `1`.
-- Per-app rules are reset and reparsed on Hyprland config reload.
+- `disabled_classes` disables kinetic scrolling for exact window classes.
 - `stop_on_target_change` stops active inertia when scroll target window changes.
 
 The plugin also respects Hyprland's `input:touchpad:scroll_factor` for
