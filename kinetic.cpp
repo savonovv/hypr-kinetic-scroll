@@ -79,24 +79,14 @@ KineticState::~KineticState() {
 }
 
 void KineticState::onAxis(IPointer::SAxisEvent& e) {
-    static auto const* PENABLED =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:enabled")->getDataStaticPtr();
-    static auto const* PDISABLE_BROWSER =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:disable_in_browser")->getDataStaticPtr();
-    static auto const* PSTOPTARGET =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_target_change")->getDataStaticPtr();
-    static auto const* PDELTA_MUL =
-        (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:delta_multiplier")->getDataStaticPtr();
-    static auto const* PDEBUG =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:debug")->getDataStaticPtr();
     static uint64_t s_lastNotifyMs = 0;
 
-    if (!**PENABLED)
+    if (!getKineticConfigInt("enabled", 1))
         return;
 
     const auto targetKeys = currentScrollTargetKeys();
 
-    if (**PSTOPTARGET && m_scrollTargetWindowKey != 0) {
+    if (getKineticConfigInt("stop_on_target_change", 1) && m_scrollTargetWindowKey != 0) {
         const bool windowChanged = targetKeys.windowKey != 0 && targetKeys.windowKey != m_scrollTargetWindowKey;
         const bool surfaceChanged = targetKeys.surfaceKey != 0 && targetKeys.surfaceKey != m_scrollTargetSurfaceKey;
         if (windowChanged || surfaceChanged)
@@ -112,7 +102,7 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
             return;
         }
 
-        if (**PDISABLE_BROWSER && !hasRule && classLooksLikeBrowser(PWIN->m_class)) {
+        if (getKineticConfigInt("disable_in_browser", 1) && !hasRule && classLooksLikeBrowser(PWIN->m_class)) {
             if (m_decaying)
                 stopKinetic("browserFocus");
             return;
@@ -128,12 +118,12 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
     if (e.delta == 0.0 && e.deltaDiscrete == 0)
         return;
 
-    const double scaledDelta = e.delta * **PDELTA_MUL;
+    const double scaledDelta = e.delta * getKineticConfigFloat("delta_multiplier", 1.25);
 
     // New finger scroll while decaying => continue from current momentum
     const bool resumedFromDecay = m_decaying;
     if (resumedFromDecay) {
-        if (**PDEBUG) {
+        if (getKineticConfigInt("debug", 0)) {
             std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
             if (log.is_open())
                 log << "[hypr-kinetic-scroll] onAxis: decaying -> resume self=" << this << "\n";
@@ -171,7 +161,7 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
 
     m_lastEventMs = e.timeMs;
 
-    if (**PDEBUG) {
+    if (getKineticConfigInt("debug", 0)) {
         auto     now    = std::chrono::steady_clock::now();
         uint64_t nowMs  = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
         if (nowMs - s_lastNotifyMs > 200) {
@@ -200,9 +190,7 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
 }
 
 void KineticState::stopKinetic(const char* reason) {
-    static auto const* PDEBUG =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:debug")->getDataStaticPtr();
-    if (**PDEBUG) {
+    if (getKineticConfigInt("debug", 0)) {
         std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
         if (log.is_open())
             log << "[hypr-kinetic-scroll] stopKinetic reason=" << (reason ? reason : "(null)") << " self=" << this << "\n";
@@ -221,9 +209,7 @@ void KineticState::stopKinetic(const char* reason) {
 int KineticState::onStopTimer(void* data) {
     auto* self = static_cast<KineticState*>(data);
 
-    static auto const* PDEBUG =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:debug")->getDataStaticPtr();
-    if (**PDEBUG) {
+    if (getKineticConfigInt("debug", 0)) {
         std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
         if (log.is_open()) {
             log << "[hypr-kinetic-scroll] stopTimer tracking=" << (self->m_tracking ? 1 : 0)
@@ -234,11 +220,9 @@ int KineticState::onStopTimer(void* data) {
     if (!self->m_tracking)
         return 0;
 
-    static auto const* PMINVEL =
-        (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:min_velocity")->getDataStaticPtr();
-
     // Only start kinetic if velocity is above threshold
-    if (std::abs(self->m_velocityV) < **PMINVEL && std::abs(self->m_velocityH) < **PMINVEL) {
+    const double minVelocity = getKineticConfigFloat("min_velocity", 0.5);
+    if (std::abs(self->m_velocityV) < minVelocity && std::abs(self->m_velocityH) < minVelocity) {
         self->m_tracking = false;
         return 0;
     }
@@ -247,25 +231,15 @@ int KineticState::onStopTimer(void* data) {
     self->m_tracking = false;
     self->m_decaying = true;
 
-    static auto const* PINTERVAL =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:interval_ms")->getDataStaticPtr();
-
-    wl_event_source_timer_update(self->m_decayTimer, **PINTERVAL);
+    wl_event_source_timer_update(self->m_decayTimer, getKineticConfigInt("interval_ms", 16));
     return 0;
 }
 
 int KineticState::onDecayTimer(void* data) {
     auto* self = static_cast<KineticState*>(data);
 
-    static auto const* PDEBUG =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:debug")->getDataStaticPtr();
-    static auto const* PDISABLE_BROWSER =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:disable_in_browser")->getDataStaticPtr();
-    static auto const* PSTOPTARGET =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_target_change")->getDataStaticPtr();
-
     if (!self->m_decaying) {
-        if (**PDEBUG) {
+        if (getKineticConfigInt("debug", 0)) {
             std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
             if (log.is_open())
                 log << "[hypr-kinetic-scroll] decayTimer skipped (not decaying)\n";
@@ -275,7 +249,7 @@ int KineticState::onDecayTimer(void* data) {
 
     const auto targetKeys = currentScrollTargetKeys();
 
-    if (**PSTOPTARGET && self->m_scrollTargetWindowKey != 0) {
+    if (getKineticConfigInt("stop_on_target_change", 1) && self->m_scrollTargetWindowKey != 0) {
         const bool windowChanged  = targetKeys.windowKey != 0 && targetKeys.windowKey != self->m_scrollTargetWindowKey;
         const bool surfaceChanged = targetKeys.surfaceKey != 0 && targetKeys.surfaceKey != self->m_scrollTargetSurfaceKey;
         if (windowChanged || surfaceChanged) {
@@ -292,25 +266,20 @@ int KineticState::onDecayTimer(void* data) {
             return 0;
         }
 
-        if (**PDISABLE_BROWSER && !hasRule && classLooksLikeBrowser(PWIN->m_class)) {
+        if (getKineticConfigInt("disable_in_browser", 1) && !hasRule && classLooksLikeBrowser(PWIN->m_class)) {
             self->stopKinetic("browserDecay");
             return 0;
         }
     }
 
-    static auto const* PDECEL =
-        (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:decel")->getDataStaticPtr();
-    static auto const* PMINVEL =
-        (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:min_velocity")->getDataStaticPtr();
-    static auto const* PINTERVAL =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:interval_ms")->getDataStaticPtr();
-
     // Apply deceleration
-    self->m_velocityV *= **PDECEL;
-    self->m_velocityH *= **PDECEL;
+    const double decel = getKineticConfigFloat("decel", 0.92);
+    self->m_velocityV *= decel;
+    self->m_velocityH *= decel;
 
-    bool activeV = std::abs(self->m_velocityV) >= **PMINVEL;
-    bool activeH = std::abs(self->m_velocityH) >= **PMINVEL;
+    const double minVelocity = getKineticConfigFloat("min_velocity", 0.5);
+    bool activeV = std::abs(self->m_velocityV) >= minVelocity;
+    bool activeH = std::abs(self->m_velocityH) >= minVelocity;
 
     if (!activeV && !activeH) {
         self->stopKinetic("decayDone");
@@ -320,20 +289,19 @@ int KineticState::onDecayTimer(void* data) {
     self->emitSyntheticScroll();
 
     // Re-arm for next frame
-    wl_event_source_timer_update(self->m_decayTimer, **PINTERVAL);
+    wl_event_source_timer_update(self->m_decayTimer, getKineticConfigInt("interval_ms", 16));
     return 0;
 }
 
 void KineticState::emitSyntheticScroll() {
     static auto PSCROLLFACTOR = CConfigValue<Hyprlang::FLOAT>("input:touchpad:scroll_factor");
-    static auto const* PMINVEL =
-        (Hyprlang::FLOAT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:min_velocity")->getDataStaticPtr();
-
     auto     now         = std::chrono::steady_clock::now();
     uint32_t timeMs      = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
     double   scrollFactor = *PSCROLLFACTOR;
 
-    if (std::abs(m_velocityV) >= **PMINVEL) {
+    const double minVelocity = getKineticConfigFloat("min_velocity", 0.5);
+
+    if (std::abs(m_velocityV) >= minVelocity) {
         g_pSeatManager->sendPointerAxis(
             timeMs,
             WL_POINTER_AXIS_VERTICAL_SCROLL,
@@ -344,7 +312,7 @@ void KineticState::emitSyntheticScroll() {
             WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL);
     }
 
-    if (std::abs(m_velocityH) >= **PMINVEL) {
+    if (std::abs(m_velocityH) >= minVelocity) {
         g_pSeatManager->sendPointerAxis(
             timeMs,
             WL_POINTER_AXIS_HORIZONTAL_SCROLL,

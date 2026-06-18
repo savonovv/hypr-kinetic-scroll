@@ -42,17 +42,12 @@ static void onMouseButton(const IPointer::SButtonEvent& e, Event::SCallbackInfo&
     if (!g_pKineticState)
         return;
 
-    static auto const* PSTOPCLICK =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_click")->getDataStaticPtr();
-    static auto const* PDEBUG =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:debug")->getDataStaticPtr();
-
-    if (!**PSTOPCLICK)
+    if (!getKineticConfigInt("stop_on_click", 0))
         return;
 
     if (e.state != WL_POINTER_BUTTON_STATE_PRESSED)
         return;
-    if (**PDEBUG) {
+    if (getKineticConfigInt("debug", 0)) {
         std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
         if (log.is_open())
             log << "[hypr-kinetic-scroll] mouseButton -> stopKinetic\n";
@@ -66,15 +61,10 @@ static void onActiveWindow() {
     if (!g_pKineticState)
         return;
 
-    static auto const* PSTOPFOCUS =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:stop_on_focus")->getDataStaticPtr();
-
-    if (!**PSTOPFOCUS)
+    if (!getKineticConfigInt("stop_on_focus", 0))
         return;
 
-    static auto const* PDEBUG =
-        (Hyprlang::INT* const*)HyprlandAPI::getConfigValue(PHANDLE, "plugin:kinetic-scroll:debug")->getDataStaticPtr();
-    if (**PDEBUG) {
+    if (getKineticConfigInt("debug", 0)) {
         std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
         if (log.is_open())
             log << "[hypr-kinetic-scroll] activeWindow -> stopKinetic\n";
