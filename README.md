@@ -89,7 +89,12 @@ plugin:kinetic-scroll:disabled_classes = org.telegram.desktop, steam
 
 Find a window's class with `hyprctl clients` or `xprop`.
 
-Lua configs can use the same exact class matching through plugin functions:
+Lua configs can use the same exact class matching through plugin functions.
+
+Do not set `plugin:kinetic-scroll:*` through `hl.config()` on Hyprland 0.56:
+hyphenated plugin keys are rejected as unknown config keys. Compiled defaults
+apply. After the plugin is loaded, change options with `hyprctl keyword`, and
+use the Lua functions below for per-app rules.
 
 ```lua
 hl.plugin.kinetic_scroll.disable("org.telegram.desktop")
@@ -114,13 +119,8 @@ hl.plugin.kinetic_scroll.disable_default()
 hl.plugin.kinetic_scroll.reset_rules()
 ```
 
-`kinetic-scroll-rule` is still available for older legacy INI configs that
-accept plugin keywords:
-
-```ini
-kinetic-scroll-rule disable firefox
-kinetic-scroll-rule enable firefox
-```
+On Hyprland 0.56 (Lua config) the deprecated `kinetic-scroll-rule` keyword is
+not registered. Use the Lua functions above, or `disabled_classes`.
 
 Notes:
 
@@ -133,7 +133,9 @@ Notes:
 - `stop_on_target_change` stops active inertia when scroll target window changes.
 
 The plugin also respects Hyprland's `input:touchpad:scroll_factor` for
-synthetic events.
+synthetic events. Inertia frames send both the pixel axis value and
+`axis_value120`, so terminals that consume high-res wheel units (foot, Herdr,
+Ghostty) coast as well as GTK/Chromium.
 
 ## Test / Verify
 
@@ -162,7 +164,8 @@ This log shows incoming axis events, timing, and state transitions.
 - Some touchpads report scrolls as `mouse` events with smooth deltas. The plugin
   treats `mouse=1` with `deltaDiscrete=0` as eligible touchpad input.
 - If you see a version mismatch error when loading, rebuild against the running
-  Hyprland headers, or temporarily disable strict version checks (if applicable).
+  Hyprland headers. The plugin compares the compositor ABI string to the
+  headers it was compiled against.
 
 ## License
 

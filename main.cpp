@@ -3,12 +3,12 @@
 #include <hyprland/src/plugins/PluginAPI.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
 #include <hyprland/src/event/EventBus.hpp>
+#include <hyprland/src/desktop/DesktopTypes.hpp>
 #include <hyprland/src/managers/input/InputManager.hpp>
 #include <hyprland/src/config/values/types/FloatValue.hpp>
 #include <hyprland/src/config/values/types/IntValue.hpp>
 #include <hyprland/src/config/values/types/StringValue.hpp>
 #include <fstream>
-#include <sstream>
 #include <vector>
 
 extern "C" {
@@ -35,12 +35,12 @@ static void onMouseButton(const IPointer::SButtonEvent& e, Event::SCallbackInfo&
     if (!g_pKineticState)
         return;
 
-    if (!getKineticConfigInt("stop_on_click", 0))
+    if (!cfgInt(g_cfg.stopOnClick, 0))
         return;
 
     if (e.state != WL_POINTER_BUTTON_STATE_PRESSED)
         return;
-    if (getKineticConfigInt("debug", 0)) {
+    if (cfgInt(g_cfg.debug, 0)) {
         std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
         if (log.is_open())
             log << "[hypr-kinetic-scroll] mouseButton -> stopKinetic\n";
@@ -50,14 +50,14 @@ static void onMouseButton(const IPointer::SButtonEvent& e, Event::SCallbackInfo&
     g_pKineticState->stopKinetic("mouseButton");
 }
 
-static void onActiveWindow() {
+static void onActiveWindow(PHLWINDOW /*window*/, Desktop::eFocusReason /*reason*/) {
     if (!g_pKineticState)
         return;
 
-    if (!getKineticConfigInt("stop_on_focus", 0))
+    if (!cfgInt(g_cfg.stopOnFocus, 0))
         return;
 
-    if (getKineticConfigInt("debug", 0)) {
+    if (cfgInt(g_cfg.debug, 0)) {
         std::ofstream log("/tmp/hypr-kinetic-scroll.log", std::ios::app);
         if (log.is_open())
             log << "[hypr-kinetic-scroll] activeWindow -> stopKinetic\n";
@@ -70,39 +70,6 @@ static void onActiveWindow() {
 static void onConfigPreReload() {
     if (g_pKineticState)
         g_pKineticState->resetAppRules();
-}
-
-static Hyprlang::CParseResult parseKineticScrollRule(const char* /*command*/, const char* value) {
-    Hyprlang::CParseResult result;
-    std::istringstream     iss(value ? value : "");
-    std::string            mode, appClass;
-
-    if (!(iss >> mode)) {
-        result.setError("Invalid format: expected 'enable [class]' or 'disable [class]'");
-        return result;
-    }
-
-    bool enable = true;
-    if (mode == "disable")
-        enable = false;
-    else if (mode != "enable") {
-        result.setError("Invalid mode: expected 'enable' or 'disable'");
-        return result;
-    }
-
-    if (!(iss >> appClass)) {
-        g_pKineticState->setDefaultAppRule(enable);
-        return result;
-    }
-
-    std::string extra;
-    if (iss >> extra) {
-        result.setError("Invalid format: expected 'enable [class]' or 'disable [class]'");
-        return result;
-    }
-
-    g_pKineticState->setAppRule(appClass, enable);
-    return result;
 }
 
 static int luaSetAppRule(lua_State* L, bool enabled) {
@@ -148,17 +115,31 @@ static void registerLuaFunctions() {
 
 static void registerConfigValues() {
     using namespace Config::Values;
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:enabled", "Enable kinetic scrolling", 1));
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CFloatValue>("plugin:kinetic-scroll:decel", "Kinetic deceleration multiplier", 0.92F));
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CFloatValue>("plugin:kinetic-scroll:min_velocity", "Minimum velocity before stopping", 0.5F));
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:interval_ms", "Kinetic timer interval", 16));
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CFloatValue>("plugin:kinetic-scroll:delta_multiplier", "Scroll delta multiplier", 1.25F));
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:disable_in_browser", "Disable kinetic scrolling in browsers", 1));
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:stop_on_target_change", "Stop inertia when scroll target changes", 1));
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CStringValue>("plugin:kinetic-scroll:disabled_classes", "Comma or space separated classes with kinetic scrolling disabled", ""));
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:debug", "Enable kinetic scroll debug logging", 0));
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:stop_on_click", "Stop inertia on mouse click", 0));
-    HyprlandAPI::addConfigValueV2(PHANDLE, makeShared<CIntValue>("plugin:kinetic-scroll:stop_on_focus", "Stop inertia on focus change", 0));
+    // Keep the SPs alive. addConfigValueV2 only weakly tracks them; dropping
+    // the last strong ref destroys the value and aborts Hyprland.
+    g_cfg.enabled            = makeShared<CIntValue>("plugin:kinetic-scroll:enabled", "Enable kinetic scrolling", 1);
+    g_cfg.decel              = makeShared<CFloatValue>("plugin:kinetic-scroll:decel", "Kinetic deceleration multiplier", 0.92F);
+    g_cfg.minVelocity        = makeShared<CFloatValue>("plugin:kinetic-scroll:min_velocity", "Minimum velocity before stopping", 0.5F);
+    g_cfg.intervalMs         = makeShared<CIntValue>("plugin:kinetic-scroll:interval_ms", "Kinetic timer interval", 16);
+    g_cfg.deltaMultiplier    = makeShared<CFloatValue>("plugin:kinetic-scroll:delta_multiplier", "Scroll delta multiplier", 1.25F);
+    g_cfg.disableInBrowser   = makeShared<CIntValue>("plugin:kinetic-scroll:disable_in_browser", "Disable kinetic scrolling in browsers", 1);
+    g_cfg.stopOnTargetChange = makeShared<CIntValue>("plugin:kinetic-scroll:stop_on_target_change", "Stop inertia when scroll target changes", 1);
+    g_cfg.disabledClasses    = makeShared<CStringValue>("plugin:kinetic-scroll:disabled_classes", "Comma or space separated classes with kinetic scrolling disabled", "");
+    g_cfg.debug              = makeShared<CIntValue>("plugin:kinetic-scroll:debug", "Enable kinetic scroll debug logging", 0);
+    g_cfg.stopOnClick        = makeShared<CIntValue>("plugin:kinetic-scroll:stop_on_click", "Stop inertia on mouse click", 0);
+    g_cfg.stopOnFocus        = makeShared<CIntValue>("plugin:kinetic-scroll:stop_on_focus", "Stop inertia on focus change", 0);
+
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.enabled);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.decel);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.minVelocity);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.intervalMs);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.deltaMultiplier);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.disableInBrowser);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.stopOnTargetChange);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.disabledClasses);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.debug);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.stopOnClick);
+    HyprlandAPI::addConfigValueV2(PHANDLE, g_cfg.stopOnFocus);
 }
 
 static void registerTouchpadCallbacks() {
@@ -188,23 +169,19 @@ APICALL EXPORT std::string PLUGIN_API_VERSION() {
 APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
     PHANDLE = handle;
 
-    // NOTE: version check skipped for local dev (headers v0.53.3, running v0.53.1).
-    // Re-enable for distribution:
-    // if (__hyprland_api_get_hash() != __hyprland_api_get_client_hash())
-    //     throw std::runtime_error("Version mismatch");
+    if (std::string{__hyprland_api_get_hash()} != std::string{__hyprland_api_get_client_hash()})
+        throw std::runtime_error("Version mismatch");
 
     registerConfigValues();
 
-    // Create kinetic state (must be before registering keyword so it's available during config parse)
     g_pKineticState = new KineticState();
 
-    HyprlandAPI::addConfigKeyword(PHANDLE, "kinetic-scroll-rule", parseKineticScrollRule, {});
     registerLuaFunctions();
 
     // Register event callbacks
-    g_pAxisCallback = Event::bus()->m_events.input.mouse.axis.listen(onMouseAxis);
-    g_pButtonCallback = Event::bus()->m_events.input.mouse.button.listen(onMouseButton);
-    g_pWindowCallback = Event::bus()->m_events.window.active.listen(onActiveWindow);
+    g_pAxisCallback         = Event::bus()->m_events.input.mouse.axis.listen(onMouseAxis);
+    g_pButtonCallback       = Event::bus()->m_events.input.mouse.button.listen(onMouseButton);
+    g_pWindowCallback       = Event::bus()->m_events.window.active.listen(onActiveWindow);
     g_pConfigReloadCallback = Event::bus()->m_events.config.preReload.listen(onConfigPreReload);
     registerTouchpadCallbacks();
 
@@ -212,15 +189,20 @@ APICALL EXPORT PLUGIN_DESCRIPTION_INFO PLUGIN_INIT(HANDLE handle) {
 }
 
 APICALL EXPORT void PLUGIN_EXIT() {
-    // Release callback refs (Hyprland auto-cleans registered callbacks on plugin unload,
-    // but resetting our SPs ensures deterministic ordering)
     g_pAxisCallback.reset();
     g_pButtonCallback.reset();
     g_pWindowCallback.reset();
     g_pConfigReloadCallback.reset();
     g_pTouchpadCallbacks.clear();
 
-    // Clean up kinetic state (removes wl timers)
     delete g_pKineticState;
     g_pKineticState = nullptr;
+
+    // Drop CIntValue/CConfigValue views while this .so is still mapped.
+    // addConfigValueV2 copies defaults into Lua wrappers; those wrappers are
+    // erased in onPluginUnload after PLUGIN_EXIT. If our CConfigValue objects
+    // stay in Hyprland's global registry past that, the post-unload config
+    // reload looks up deleted plugin keys and aborts (unload then load).
+    g_cfg = {};
+    PHANDLE = nullptr;
 }
