@@ -1,4 +1,5 @@
 #pragma once
+#include <hyprland/src/config/ConfigValue.hpp>
 #include <hyprland/src/devices/IPointer.hpp>
 #include <wayland-server-core.h>
 #include <cstdint>
@@ -38,6 +39,10 @@ class KineticState {
 
     wl_event_source* m_stopTimer  = nullptr;
     wl_event_source* m_decayTimer = nullptr;
+
+    // Bound in the ctor and destroyed in PLUGIN_EXIT with this object, so it
+    // leaves Hyprland's CConfigValueBase registry before the .so is unmapped.
+    CConfigValue<Hyprlang::FLOAT> m_scrollFactor;
 
     std::unordered_map<std::string, bool> m_perAppRules;
     bool                                  m_defaultAppRule = true;
