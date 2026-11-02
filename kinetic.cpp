@@ -46,6 +46,15 @@ struct SScrollTargetKeys {
     uintptr_t surfaceKey = 0;
 };
 
+// Support both older and newer Hyprland window metadata APIs.
+template <typename TWindow>
+static const std::string& getWindowClass(const TWindow& window) {
+    if constexpr (requires { window.metadata().appID(); })
+        return window.metadata().appID();
+    else
+        return window.m_class;
+}
+
 bool KineticState::hasAppRule(const std::string& windowClass) const {
     return m_perAppRules.contains(windowClass);
 }
@@ -116,20 +125,20 @@ void KineticState::onAxis(IPointer::SAxisEvent& e) {
 
     const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
     if (PWIN) {
-        const bool hasRule = hasAppRule(PWIN->m_class);
-        if (classInList(PWIN->m_class, getKineticConfigString("disabled_classes", ""))) {
+        const bool hasRule = hasAppRule(getWindowClass(*PWIN));
+        if (classInList(getWindowClass(*PWIN), getKineticConfigString("disabled_classes", ""))) {
             if (m_decaying)
                 stopKinetic("disabledClasses");
             return;
         }
 
-        if (!shouldProcessForWindow(PWIN->m_class)) {
+        if (!shouldProcessForWindow(getWindowClass(*PWIN))) {
             if (m_decaying)
                 stopKinetic("appRule");
             return;
         }
 
-        if (getKineticConfigInt("disable_in_browser", 1) && !hasRule && classLooksLikeBrowser(PWIN->m_class)) {
+        if (getKineticConfigInt("disable_in_browser", 1) && !hasRule && classLooksLikeBrowser(getWindowClass(*PWIN))) {
             if (m_decaying)
                 stopKinetic("browserFocus");
             return;
@@ -323,18 +332,18 @@ int KineticState::onDecayTimer(void* data) {
 
     const auto PWIN = g_pInputManager ? g_pInputManager->m_lastMouseFocus.lock() : nullptr;
     if (PWIN) {
-        const bool hasRule = self->hasAppRule(PWIN->m_class);
-        if (classInList(PWIN->m_class, getKineticConfigString("disabled_classes", ""))) {
+        const bool hasRule = self->hasAppRule(getWindowClass(*PWIN));
+        if (classInList(getWindowClass(*PWIN), getKineticConfigString("disabled_classes", ""))) {
             self->stopKinetic("disabledClassesDecay");
             return 0;
         }
 
-        if (!self->shouldProcessForWindow(PWIN->m_class)) {
+        if (!self->shouldProcessForWindow(getWindowClass(*PWIN))) {
             self->stopKinetic("appRuleDecay");
             return 0;
         }
 
-        if (getKineticConfigInt("disable_in_browser", 1) && !hasRule && classLooksLikeBrowser(PWIN->m_class)) {
+        if (getKineticConfigInt("disable_in_browser", 1) && !hasRule && classLooksLikeBrowser(getWindowClass(*PWIN))) {
             self->stopKinetic("browserDecay");
             return 0;
         }
